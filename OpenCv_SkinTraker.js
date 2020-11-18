@@ -1,7 +1,12 @@
+//Video Size
 let width=480, height=640;
+
+//Html Tag
 const video = document.getElementById("video");
 const canvas = document.getElementById('output');
 const testText = document.getElementById('testText');
+const testText2 = document.getElementById('testText2');
+
 canvas.width = width;
 canvas.height = height;
 const constraints = {
@@ -40,7 +45,7 @@ let Red, Blue, Green;
 //Hull
 let defect, hullDefect;
 //finger
-let findContours;
+let fingerContours, fingerHierarchy;
 
 function OpenCv() {
     //피부색
@@ -60,7 +65,7 @@ function OpenCv() {
     dst = new cv.Mat();
     
     //Morphological 설정
-    M = cv.Mat.ones(5, 5, cv.CV_8UC1);
+    M = cv.Mat.ones(7, 7, cv.CV_8UC1);
     anchor = new cv.Point(-1, -1);
 
     //캠
@@ -75,9 +80,12 @@ function OpenCv() {
 }
 
 let centerX,centerY, moveCountX = 0, moveCountY = 0;
-
-const  responsiveness = 9;
-
+let tempCenterX, tempCentery;
+let select = false, selectCount = 0;
+let TimeChek =  Date.now();
+let tempTimeChek = Date.now();
+const  responsiveness = 30;
+let MoevControl;
 function process() {
     let MaxW = 0, MaxH = 0, MaxX = 0, MaxY = 0, countPoint = 0;
     cap.read(src);
@@ -91,6 +99,8 @@ function process() {
     high = new cv.Mat(height, width, hsvs.type(), upper);
     contours = new cv.MatVector();
     findContours = new cv.MatVector();
+    fingerContours = new cv.MatVector();
+    fingerHierarchy = new cv.Mat();
     hierarchy = new cv.Mat();
     hull = new cv.MatVector();
     distTrans = new cv.Mat();
@@ -118,14 +128,11 @@ function process() {
     for (let i = 0; i < contours.size(); ++i) {
         let rect = cv.boundingRect(contours.get(i));
         if(MaxW*MaxH < rect.width * rect.height && (rect.width * rect.height) > 5000){
-            if(MaxY < rect.y){
-                MaxW = rect.width;
-                MaxH = rect.height;
-                MaxX = rect.x;
-                MaxY = rect.y;
-                HandNum = i;
-                
-            }
+            MaxW = rect.width;
+            MaxH = rect.height;
+            MaxX = rect.x;
+            MaxY = rect.y;
+            HandNum = i;
         }
     }
 
@@ -142,92 +149,104 @@ function process() {
 
     //최고점을 찾아 손 중앙으로 인식
     let minMaxResult = cv.minMaxLoc(fingerMat);
-    cv.circle(src, new cv.Point(minMaxResult.maxLoc.x + MaxX, minMaxResult.maxLoc.y + MaxY), minMaxResult.maxVal * (MaxW + MaxH)/6, Green, 2);
+    let radius = minMaxResult.maxVal * (MaxW + MaxH)/7;
+    let handXpositon = minMaxResult.maxLoc.x + MaxX;
+    let handYpositon = minMaxResult.maxLoc.y + MaxY;
+    cv.circle(src, new cv.Point(handXpositon, handYpositon), radius, Green, 2);
+   
 
-    //상하 확인
-    if(centerY < MaxY + (MaxH/2)){
-        if(moveCountY > 0){moveCountY = 0}
-        moveCountY--;
-    }
-
-    if(centerY > MaxY + (MaxH/2)){
-        if(moveCountY < 0){moveCountY = 0}
-        moveCountY++;
-    }
-
-    //좌우 확인
-    if(centerX < MaxX + (MaxW/2)){
-        if(moveCountX > 0){moveCountX = 0}
-        moveCountX--;
-    }
-    if(centerX > MaxX + (MaxW/2)){
-        if(moveCountX < 0){moveCountX = 0}
-        moveCountX++;
-
-    }
-
-    //상하 좌우 중 이동량이 많은 쪽으로 결정
-    if(Math.abs(moveCountX) > Math.abs(moveCountY)){
-        if(moveCountX > responsiveness){
-            testText.innerHTML = "Right";
-            moveCountX = 0;
-            moveCountY = 0;
-        }
-        if(moveCountX < -responsiveness){
-            testText.innerHTML = "Left";
-            moveCountX = 0;
-            moveCountY = 0;
-        }
-    }else{
-        if(moveCountY > responsiveness){
-            testText.innerHTML = "UP";
-            moveCountX = 0;
-            moveCountY = 0;
-        }
-        if(moveCountY < -responsiveness){
-            testText.innerHTML = "Down";
-            moveCountX = 0;
-            moveCountY = 0;
-        }
-    }
-
-    //손 중앙점 업데이트
-    centerX = MaxX + (MaxW/2);
-    centerY = MaxY + (MaxH/2);
-
-    //Hull 경계선 탐색
-/*     let Conhull = new cv.Mat();
-    let defect = new cv.Mat();
-    try{
-            
-        let Hullcnt = contours.get(HandNum);
-        
-        cv.convexHull(Hullcnt, Conhull, false, false);
-        cv.convexityDefects(Hullcnt, Conhull, defect);
-        for (let j = 0; j < defect.rows; ++j) {
-            let far = new cv.Point(Hullcnt.data32S[defect.data32S[j * 4 + 2] * 2],
-                Hullcnt.data32S[defect.data32S[j * 4 + 2] * 2 + 1]);
-            let handCenter = new cv.Point(MaxX + (MaxW/2), MaxY + (MaxH/2));
-            if(Math.sqrt((handCenter.x - far.x)**2 + (handCenter.y - far.y)**2) > ((MaxW/2) + (MaxH/2))/2){
-                cv.circle(src, far, 3, Red, -1);
-                countPoint++;
-            }
-        }
- */
     try{
     cv.drawContours(src, hull, HandNum, Red, 1, 8, hierarchy, 0);
     }catch(e){
 
     }
-    /*     
-}catch(e){
-    } */
 
     //손 트레킹
     cv.rectangle(src, new cv.Point(MaxX, MaxY), new cv.Point(MaxX + MaxW, MaxY +MaxH), Red, 2, cv.LINE_AA, 0);
 
     //좌우 변경
     cv.flip(src,src,1);
+
+    if(TimeChek + 300 < tempTimeChek){
+        console.log("go");
+        testText2.innerHTML = "o";
+        if(selectCount > 5){
+            if(handYpositon - MaxH > radius * 1.5){
+                selectCount = 0;
+                MoevControl = 0;   
+            }
+        }
+        if(handYpositon - MaxH < radius * 1.3){
+            selectCount++;
+        }
+        console.log(select);
+        tempCenterX = MaxX + (MaxW/2);
+        tempCenterY = MaxY + (MaxH/2);
+
+        //상하 좌우 중 이동량이 많은 쪽으로 결정
+        if(tempCenterX < centerX - (MaxW/2)){
+            MoevControl = 2;
+            moveCountX = 0;
+            moveCountY = 0;
+        }
+        if(tempCenterX > centerX+(MaxW/2)){
+            MoevControl = 3;
+            moveCountX = 0;
+            moveCountY = 0;
+        }
+        if(tempCenterY < centerY - (MaxH/2)){
+            MoevControl = 4;
+            moveCountX = 0;
+            moveCountY = 0;
+        }
+        if(tempCenterY > centerY + (MaxH/2)){
+            MoevControl = 5;
+            moveCountX = 0;
+            moveCountY = 0;
+        }
+    switch(MoevControl){
+            case 0: 
+                testText.innerHTML = "Check";
+                TimeChek =Date.now();
+            break;
+            case 1: 
+            break;
+            case 2: 
+                testText.innerHTML = "Right";
+                select = true;
+                TimeChek =Date.now();
+            break;
+            case 3: 
+                testText.innerHTML = "Left";
+                select = true;
+                TimeChek =Date.now();
+            break;
+            case 4: 
+                testText.innerHTML = "Up";
+                select = true;
+                TimeChek =Date.now();
+                break;
+            case 5: 
+                testText.innerHTML = "Down";
+                select = true;
+                TimeChek =Date.now();
+            break;
+        }
+        
+        tempTimeChek =Date.now();
+    }else{
+        console.log("stop");
+        testText2.innerHTML = "x";
+        MoevControl = 1;
+        tempTimeChek =Date.now();
+        moveCountX = 0;
+        moveCountY = 0;
+        selectCount = 0;
+        //손 중앙점 업데이트
+        centerX = MaxX + (MaxW/2);
+        centerY = MaxY + (MaxH/2);
+    }
+
 
     //'output' 캔버스에 이미지 로딩
     cv.imshow('output', src);
@@ -242,6 +261,9 @@ function process() {
     defect.delete(); */
     distTrans.delete();
     findContours.delete();
+    fingerContours.delete();
+    fingerHierarchy.delete();
+
     //Windows에 이미지 리로딩 부탁
     requestAnimationFrame(process); 
 }
